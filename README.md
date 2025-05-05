@@ -18,6 +18,7 @@
   - [CRD 设计](#crd-设计)
   - [安全性与可扩展性建议](#安全性与可扩展性建议)
   - [安装与使用](#安装与使用)
+  - [ROADMAP](#roadmap)
   - [参考文档](#参考文档)
 
 ## 架构目标
@@ -33,7 +34,7 @@
 - **Syncer**：配置同步器，将其他节点状态拉取至本地；
 - **Pod + Sidecar**：服务消费方，负责映射与 DNS 劫持。
 
-![架构示意图](docs/architect.png)
+[架构文档](docs/architect.md)
 
 ## 核心组件
 
@@ -58,7 +59,7 @@
 
 ### Sidecar
 
-- 根据环境变量 `SIDECAR_MAPPED_SERVICES` 和 `SIDECAR_IP_RANGE` 读取映射需求；
+- 根据环境变量 `SIDECAR_MAPPED_SERVICES`、`SIDECAR_IP_RANGE` 和 `SIDECAR_DNS_ADDR` 读取映射与 DNS 劫持配置；
 - 从本地 APIServer 读取 Router 状态，选择可用 Router；
 - 启动 frpc：
   - **Dial 模式（stcp）**：将远端服务映射到本地 `127.0.66.x:PORT`；
@@ -82,6 +83,7 @@
    ```shell
    export SIDECAR_MAPPED_SERVICES=mysql
    export SIDECAR_IP_RANGE=127.0.66.0/24
+   export SIDECAR_DNS_ADDR=127.0.0.2:53  # 可选，自定义 DNS 劫持监听地址，默认为 127.0.0.2:53
    ```
 2. Sidecar 查询 APIServer，发现远端 Router 提供 MySQL；
 3. Sidecar 启动 frpc，将远端 MySQL 映射至本地 `127.0.66.x:3306`；
@@ -128,12 +130,22 @@ status:
    git clone https://github.com/your-repo/servicekeel.git
    cd servicekeel
    ```
-2. 构建并启动各组件：
+2. 构建 Sidecar 二进制或镜像：
    ```bash
-   make build
-   make run
+   make build-sidecar    # 或者使用 Dockerfile 构建镜像
    ```
-3. 查看更多细节，请参阅 `docs/architect.md`。
+3. 运行 Sidecar：
+   ```bash
+   ./servicekeel-sidecar \
+     --mapped-services=mysql \
+     --ip-range=127.0.66.0/24 \
+     --dns-addr=127.0.0.2:53
+   ```
+4. 部署 Sidecar 作为 Kubernetes 容器时，也可在 Pod 规格里设置上述环境变量。
+
+## ROADMAP
+
+可以看 [ROADMAP](ROADMAP.md)
 
 ## 参考文档
 
