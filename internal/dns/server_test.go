@@ -40,8 +40,10 @@ func TestHandleRequest(t *testing.T) {
 	}
 	// register default mapping for test
 	qname := "test.default.svc."
-	wantIP := net.ParseIP("127.0.66.1")
-	s.AddMapping(qname, wantIP)
+	wantIP, err := s.AddMapping(qname)
+	if err != nil {
+		t.Fatalf("AddMapping() returned error: %v", err)
+	}
 	// Start on random available port
 	if err := s.Start("127.0.0.1:0"); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -101,7 +103,7 @@ func TestAddMapping(t *testing.T) {
 	// register custom mapping
 	qname := "custom.service.svc."
 	customIP := net.ParseIP("127.0.66.9")
-	s.AddMapping(qname, customIP)
+	s.AddMapping(qname)
 
 	// start server
 	if err := s.Start("127.0.0.1:0"); err != nil {

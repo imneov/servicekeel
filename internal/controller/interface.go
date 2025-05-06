@@ -15,5 +15,7 @@ type EndpointInfo struct {
 	ServiceName     string
 	ServicePort     string
 	ServiceProtocol string
-	ServiceIP       string // 准备用于生成service的 host，需要限制在范围内
+	MappedIP        string             // 准备用于映射 service的 host，需要限制在范围内
+	FRPClient       FRPClientInterface // 用于管理 frpc 的客户端
+	ProxyName       string             // 记录 frpc 的 proxy name
 }

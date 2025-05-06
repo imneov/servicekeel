@@ -2,26 +2,53 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
-	"net"
+	"net/http"
 	"os"
 	"strings"
 
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	zap "sigs.k8s.io/controller-runtime/pkg/log/zap"
+
 	"github.com/imneov/servicekeel/internal/controller"
 	"github.com/imneov/servicekeel/internal/dns"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // CLI flags
 var (
-	flagServices = flag.String("mapped-services", "", "comma-separated list of services to map (env: SIDECAR_MAPPED_SERVICES)")
-	flagIPRange  = flag.String("ip-range", "", "CIDR notation IP range for mapping (env: SIDECAR_IP_RANGE)")
-	flagDNSAddr  = flag.String("dns-addr", "", "DNS listen address (env: SIDECAR_DNS_ADDR), e.g., 127.0.0.2:53")
+	flagServices    = flag.String("mapped-services", "", "comma-separated list of services to map (env: SIDECAR_MAPPED_SERVICES)")
+	flagIPRange     = flag.String("ip-range", "", "CIDR notation IP range for mapping (env: SIDECAR_IP_RANGE)")
+	flagDNSAddr     = flag.String("dns-addr", "", "DNS listen address (env: SIDECAR_DNS_ADDR), e.g., 127.0.0.2:53")
+	flagMetricsAddr = flag.String("metrics-addr", "", "address for metrics and health endpoints (env: METRICS_ADDR), default :8080")
 )
 
 func main() {
 	// parse CLI flags
 	flag.Parse()
+
+	// initialize controller-runtime logger
+	logf.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	// setup metrics and health HTTP server
+	metricsAddr := *flagMetricsAddr
+	if metricsAddr == "" {
+		metricsAddr = os.Getenv("METRICS_ADDR")
+		if metricsAddr == "" {
+			metricsAddr = ":8080"
+		}
+	}
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		log.Printf("Metrics and health listening on %s", metricsAddr)
+		if err := http.ListenAndServe(metricsAddr, mux); err != nil {
+			log.Fatalf("metrics server failed: %v", err)
+		}
+	}()
 
 	// determine mapped services
 	servicesEnv := *flagServices
@@ -71,43 +98,13 @@ func main() {
 		targetServices[svc] = struct{}{}
 	}
 
-	// 初始化 APIServer 客户端
-	apiClient, err := controller.NewFRPSServer(services, dnsServer)
+	// 初始化 controller
+	controller, err := controller.NewFRPSServer(services, dnsServer)
 	if err != nil {
 		log.Fatalf("创建 APIServer 客户端失败: %v", err)
 	}
 
-	apiClient.Start()
-
-	go func() {
-		mapping := make(map[string]net.IP)
-		for routersList := range routerCh {
-			for _, r := range routersList {
-				name := r.getName()
-				ipStr := r.getIP()
-				if _, want := targetServices[svc]; !want {
-					continue
-				}
-				if _, exists := mapping[svc]; exists {
-					log.Printf("服务 %s 已存在映射", svc)
-					continue
-				}
-
-				ip := net.ParseIP(ipStr)
-				if ip == nil {
-					log.Printf("解析 IP 失败: %s", ipStr)
-					continue
-				}
-
-				fqdn := fmt.Sprintf("%s.", svc)
-				dnsServer.AddMapping(fqdn, ip)
-			}
-		}
-	}()
-
-	// TODO: 根据 Router 状态和服务列表选择合适 Router，执行 frpc 注册
-	// frpcClient := frpc.NewClient(...)
-	// err = frpcClient.RegisterDial(...)
+	controller.Start()
 
 	// 阻塞主进程
 	select {}
@@ -115,7 +112,10 @@ func main() {
 
 // startDNSServer creates and starts the DNS hijacking server for sidecar.
 func startDNSServer(ipRange, addr string) (*dns.Server, error) {
-	server := dns.NewServer(ipRange)
+	server, err := dns.NewServer(ipRange)
+	if err != nil {
+		return nil, err
+	}
 	if err := server.Start(addr); err != nil {
 		return nil, err
 	}

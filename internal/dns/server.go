@@ -16,7 +16,9 @@ type Server struct {
 	ipNet    *net.IPNet
 	server   *mdns.Server
 	mu       sync.RWMutex
+	aliases  map[string]string
 	mappings map[string]net.IP
+	usedIPs  map[string]struct{}
 }
 
 // NewServer creates a new DNS hijacking server for the given IP range.
@@ -29,7 +31,9 @@ func NewServer(ipRange string) (*Server, error) {
 	return &Server{
 		ipRange:  ipRange,
 		ipNet:    ipNet,
+		aliases:  make(map[string]string),
 		mappings: make(map[string]net.IP),
+		usedIPs:  make(map[string]struct{}),
 	}, nil
 }
 
@@ -40,18 +44,62 @@ func (s *Server) GetIP(idx int) string {
 	return ip.String()
 }
 
+// getUnusedIP 依照ipRange，返回一个未使用的ip
+func (s *Server) getUnusedIP() net.IP {
+	ip := s.ipNet.IP.Mask(s.ipNet.Mask)
+	for i := 0; i < 256; i++ {
+		ipStr := ip.String()
+		if _, ok := s.usedIPs[ipStr]; !ok {
+			s.usedIPs[ipStr] = struct{}{}
+			return ip
+		}
+		ip[3]++
+	}
+	return nil
+}
+
 // AddMapping registers a fixed IP for the given DNS query name.
-func (s *Server) AddMapping(name string, ip net.IP) {
+func (s *Server) AddMapping(name string) (net.IP, error) {
+	if ip, ok := s.mappings[name]; ok {
+		return ip, nil
+	}
+	ip := s.getUnusedIP()
+	if ip == nil {
+		log.Printf("no unused IP found")
+		return nil, fmt.Errorf("no unused IP found")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.usedIPs[ip.String()] = struct{}{}
 	s.mappings[name] = ip
+	return ip, nil
+}
+
+// AddMappingAlias registers a fixed IP for the given DNS query name.
+func (s *Server) AddMappingAlias(name string, alias ...string) error {
+	for _, a := range alias {
+		s.aliases[a] = name
+	}
+	return nil
 }
 
 // RemoveMapping removes a mapping for the given DNS query name.
-func (s *Server) RemoveMapping(name string) {
+func (s *Server) RemoveMapping(name string) (net.IP, error) {
+	ip, ok := s.mappings[name]
+	if !ok {
+		log.Printf("no mapping for %s", name)
+		return nil, fmt.Errorf("no mapping for %s", name)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.mappings, name)
+	delete(s.usedIPs, ip.String())
+	for k, v := range s.aliases {
+		if v == name {
+			delete(s.aliases, k)
+		}
+	}
+	return ip, nil
 }
 
 // Start begins listening for DNS queries on the given UDP address.
@@ -103,6 +151,9 @@ func (s *Server) handleRequest(w mdns.ResponseWriter, req *mdns.Msg) {
 		log.Printf("Handling DNS A query for %s", q.Name)
 		s.mu.RLock()
 		mappedIP, ok := s.mappings[q.Name]
+		if !ok {
+			mappedIP, ok = s.mappings[s.aliases[q.Name]]
+		}
 		s.mu.RUnlock()
 		if !ok {
 			if idx := strings.Index(q.Name, "."); idx > 0 {
