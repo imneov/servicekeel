@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
+	"k8s.io/klog"
 )
 
 type FRPClient struct {
@@ -12,52 +14,76 @@ type FRPClient struct {
 	Cmd  *exec.Cmd
 }
 
+// NewFRPClient creates a new FRP client
+// name: frpc proxy name
+// args: endpoint info
 func NewFRPClient(name string, args *EndpointInfo) (*FRPClient, error) {
-	// frpc stcp visitor
-	// -n apiserver-cluster-demo1-v-mac-m1-5
-	// --server-name 1.1.1.5:3306
-	// --sk abc001
-	// --bind-port 3306
-	// --bind-addr 127.0.66.1
-	// -s frp.thingsdao.com
+	client := &FRPClient{
+		Name: name,
+	}
 	if name == "" {
 		name = args.ServiceName + "-" + args.MappedIP
 	}
-	if args.FrpServerAddr == "" {
-		return nil, fmt.Errorf("FrpServerAddr is empty")
-	}
-	if args.FrpServerPort == "" {
-		return nil, fmt.Errorf("FrpServerPort is empty")
+	if args.FrpServerListen == "" {
+		return nil, fmt.Errorf("FrpServerListen is empty")
 	}
 	if args.FrpSecretKey == "" {
 		return nil, fmt.Errorf("FrpSecretKey is empty")
 	}
-	if args.MappedIP == "" {
-		return nil, fmt.Errorf("MappedIP is empty")
-	}
 	if args.ServicePort == "" {
 		return nil, fmt.Errorf("ServicePort is empty")
 	}
-	frpArgs := []string{
-		"stcp",
-		"visitor",
-		"-n", name,
-		"--server-name", args.ServiceName,
-		"--sk", args.FrpSecretKey,
-		"--bind-addr", args.MappedIP,
-		"--bind-port", args.ServicePort,
-		"-s", fmt.Sprintf("%s:%s", args.FrpServerAddr, args.FrpServerPort),
+	switch args.Type {
+	case EndpointTypeImported:
+		// e.g.
+		// frpc stcp visitor
+		// -n 172.31.19.5:80/123
+		// --server-name 172.31.19.5:80/123
+		// --sk servicekeel-secret-key
+		// --bind-addr 127.0.0.1
+		// --bind-port 48001
+		// --server-listen /tmp/frp.sock
+		if args.MappedIP == "" {
+			return nil, fmt.Errorf("MappedIP is empty")
+		}
+		client.Args = []string{
+			"stcp",
+			"visitor",
+			"-n", name,
+			"--server-name", args.ServiceName,
+			"--sk", args.FrpSecretKey,
+			"--bind-addr", args.MappedIP,
+			"--bind-port", args.ServicePort,
+			"--server-listen", args.FrpServerListen,
+		}
+	case EndpointTypeExported:
+		// e.g.
+		// frpc stcp
+		// --sk servicekeel-secret-key
+		// -n 172.31.19.5:80/123
+		// --local-ip 172.31.19.5 --local-port 80
+		// --server-listen /tmp/frp.sock
+		client.Args = []string{
+			"stcp",
+			"server",
+			"-n", name,
+			"--sk", args.FrpSecretKey,
+			// "--local-ip", args.MappedIP,
+			"--local-port", args.ServicePort,
+			"--server-listen", args.FrpServerListen,
+		}
+	default:
+		return nil, fmt.Errorf("invalid endpoint type: %s", args.Type)
 	}
 
-	return &FRPClient{
-		Name: name,
-		Args: frpArgs,
-	}, nil
+	return client, nil
 }
+
 func (c *FRPClient) Start() error {
 	cmd := exec.Command("frpc", c.Args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	klog.Infof("Starting FRP client %s: %v", c.Name, c.Args)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start FRP client %s: %w", c.Name, err)
 	}
@@ -66,6 +92,7 @@ func (c *FRPClient) Start() error {
 }
 
 func (c *FRPClient) Stop() error {
+	klog.Infof("Stopping FRP client %s: %v", c.Name, c.Args)
 	if c.Cmd != nil && c.Cmd.Process != nil {
 		return c.Cmd.Process.Kill()
 	}

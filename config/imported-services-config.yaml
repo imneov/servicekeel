@@ -1,0 +1,13 @@
+services:
+    - cluster: cluster-a
+      name: backend
+      namespace: default
+      ports:
+        - name: http
+          port: 80
+          protocol: TCP
+          targetport: 8080
+        - name: http2
+          port: 88
+          protocol: TCP
+          targetport: 8888

@@ -1,192 +1,170 @@
-# 分布式服务映射与 DNS 劫持架构文档
+# 设计文档：边缘环境下基于 Pod 注解的服务注册与发现机制
 
-## 1. 架构目标
+## 一、背景与动机
 
-本架构旨在实现一种跨节点的服务映射与代理机制，通过 Sidecar + Router（基于 FRP 改造）机制将跨网络服务本地化，并实现按服务名 DNS 劫持，从而在边缘或异构网络中提供一种稳定、灵活、可编排的服务访问方案。
+在边缘计算场景中，节点常常处于网络不可达或弱连接状态，导致 Kubernetes 原生的基于 API Server 的服务注册与发现机制无法正常工作。
+为实现边缘自治，保障服务间通信，我们需要一种在本地也能运行的轻量级服务注册与发现方案。
 
----
+我们借鉴 Kubernetes KEP-1645（Multi-Cluster Services API）中服务导出（Export）与导入（Import）的概念，
+在边缘环境下采用注解（Annotation）和标签（Label）作为服务注册与发现信息的载体，从而绕过中心化控制面依赖，增强系统的自治能力。
 
-## 2. 架构总览
+## 二、总体设计思路
 
-每个节点包含如下组件：
+本设计提出以下关键机制：
 
-* **APIServer**（本地控制面，使用 SQLite 存储）
-* **Router**（修改过的 FRP，支持动态配置与状态上报）
-* **Syncer**（配置同步器）
-* **Pod + Sidecar**（服务消费方）
+- 服务注册：根据 Pod 被哪些 Service 选中，在其注解中记录应导出的服务名称（包含命名空间、集群信息和协议类型）。
+- 服务导入：在 Pod 注解中声明该 Pod 需要访问的服务，可指定 namespace、cluster 和协议类型。
+- 边缘代理 Sidecar/Agent：读取注解信息，完成服务注册与发现的本地逻辑，支持不同协议（TCP/UDP）的处理。
 
----
+## 三、关键定义
 
-## 3. 核心组件设计
+- `edge.io/exported-services`：表示该 Pod 所需注册的服务列表，由 Service selector 决定。
+- `edge.io/imported-services`：表示该 Pod 需访问的服务列表，由用户或 Controller 指定。
 
-### 3.1 APIServer（本地控制器）
+注解值格式统一为 JSON 序列化的字符串，例如：
 
-* 每个节点运行一个本地 APIServer，监听 `localhost:7443`。
-* 使用 SQLite 本地存储，支持 CRUD 操作。
-* 提供本节点 Router 配置（CustomResource）给本地其他组件（Router、Sidecar、Syncer）。
-* 所有 Router 的配置实际来自云端，由云端控制器写入。
+```json
+{
+  "services": [
+    {
+      "name": "service-name-1",
+      "namespace": "namespace-1",
+      "cluster": "cluster-1",
+      "ports": [
+        {"name": "http", "port": 8080, "targetPort": 8080, "protocol": "TCP"},
+        {"name": "metrics", "port": 9090, "targetPort": 9090, "protocol": "UDP"}
+      ]
+    },
+    {
+      "name": "service-name-2",
+      "namespace": "namespace-2",
+      "cluster": "cluster-1",
+      "ports": [
+        {"name": "grpc", "port": 9000, "targetPort": 9000, "protocol": "TCP"}
+      ]
+    }
+  ]
+}
+```
 
-> 资源路径示例：
-> `GET /apis/edge.example.com/v1/routers/{nodeName}`
+### 3.1 端口配置说明
 
----
+每个服务的端口配置包含以下字段：
+- `name`：端口名称，用于标识用途（如 http、metrics、grpc 等）
+- `port`：服务对外暴露的端口
+- `targetPort`：容器内部实际监听的端口
+- `protocol`：传输协议，支持 "TCP" 或 "UDP"
 
-### 3.2 Router（frps 改造版）
+## 四、设计细节
 
-* Router 是基于 FRP 的自定义版本（等价于"分布式边缘网关"）。
-* 启动时会从本地 APIServer 拉取与当前节点名称一致的 Router 配置。
-* Router 内部启动 `frps` 服务，支持 `stcp`/`xtcp` 等隧道代理。
-* 所有连接信息（包括 frpc 连接、端口、状态等）上报到 `Router` CR 的 `status` 字段。
+### 4.1 服务注册流程
+
+1. Controller 监听 Service 与 Pod 变更。
+2. 判断 Service 的 selector 是否匹配某个 Pod。
+3. 若匹配，将服务信息（包括协议类型）添加到 Pod 的 `edge.io/exported-services` 注解中。
+
+### 4.2 服务导入流程
+
+1. 用户可直接在 Pod spec 中通过 `edge.io/imported-services` 注解声明所需访问的服务，格式同导出。
+2. 注解支持省略 namespace 与 cluster（默认为当前）。
+3. 边缘 Agent 负责将导入服务建立为本地代理，根据协议类型（TCP/UDP）配置相应的代理规则。
+
+### 4.3 示例 YAML
 
 ```yaml
-apiVersion: edge.example.com/v1
-kind: Router
+apiVersion: v1
+kind: Pod
 metadata:
-  name: node-1
+  name: app
+  namespace: default
+  labels:
+    app: my-app
+  annotations:
+    edge.io/exported-services: |
+      {
+        "services": [
+          {
+            "name": "my-service",
+            "namespace": "default",
+            "cluster": "cluster-a",
+            "ports": [
+              {"name": "http", "port": 80, "targetPort": 8080, "protocol": "TCP"}
+            ]
+          },
+          {
+            "name": "metrics",
+            "namespace": "default",
+            "cluster": "cluster-a",
+            "ports": [
+              {"name": "metrics", "port": 9090, "targetPort": 9090, "protocol": "UDP"}
+            ]
+          }
+        ]
+      }
+    edge.io/imported-services: |
+      {
+        "services": [
+          {
+            "name": "db-service",
+            "namespace": "default",
+            "cluster": "cluster-b",
+            "ports": [
+              {"name": "http", "port": 80, "targetPort": 8080, "protocol": "TCP"}
+            ]
+          },
+          {
+            "name": "cache",
+            "namespace": "default",
+            "cluster": "cluster-b",
+            "ports": [
+              {"name": "metrics", "port": 9090, "targetPort": 9090, "protocol": "UDP"}
+            ]
+          }
+        ]
+      }
 spec:
-  frps:
-    bindPort: 7000
-    dashboardPort: 7500
-status:
-  clients:
-  - name: pod-abc
-    address: 127.0.66.1:3306
+  containers:
+    - name: main
+      image: app:v1
 ```
 
----
+### 4.4 服务名称约定
 
-### 3.3 Syncer（控制平面同步器）
+- `<serviceName>`（必填）
+- `<namespace>`（可选，默认当前 Pod 所在 namespace）
+- `<cluster>`（可选，默认当前集群）
 
-* 每个节点运行一个 Syncer，职责如下：
+使用完整标识可确保跨集群唯一性。
 
-  * 从静态配置（或环境变量）读取所有节点的 APIServer 地址列表，不支持动态变更
-  * 拉取所有节点的 Router CR，将其状态同步（或 patch）至本地 APIServer，用于 Sidecar 查阅
+## 五、系统组件说明
 
-> 目的：即便 Pod 与 Router 不在同一节点，Sidecar 也能"看到"目标 Router 状态。
+### 5.1 边缘 Agent / Sidecar
 
----
+- 监听 Pod 注解 `edge.io/exported-services` 和 `edge.io/imported-services`。
+- 向本地注册表（如 Consul、Envoy SDS、自定义注册表）注册导出服务。
+- 为导入服务建立代理或 DNS 重写，实现本地访问。
+- 根据服务配置的协议类型（TCP/UDP）设置相应的代理规则。
 
-### 3.4 Sidecar（服务劫持 + 注册器）
+### 5.2 Controller
 
-* 每个 Pod 启动时会自动附带一个 Sidecar。
-* Sidecar 执行以下流程：
+- 部署于中心或边缘控制面。
+- Watch Service 与 Pod，识别匹配关系，为 Pod 自动补充 `edge.io/exported-services` 注解。
+- 可通过 CR 模板或 Admission Webhook 为 Pod 注入默认的 `edge.io/imported-services`。
 
-#### 环境变量驱动
+## 六、兼容性与边缘断网处理
 
-从环境变量中获取需要映射的服务名称和 IP 段，例如：
+- 注解信息一经写入，可被边缘组件脱离 API Server 独立使用。
+- Controller 可在网络可达时批量同步注解，断网前保证信息完整。
+- 协议类型信息确保在断网情况下仍能正确处理不同类型的服务流量。
 
-```env
-SIDECAR_MAPPED_SERVICES=mysql,redis
-SIDECAR_IP_RANGE=127.0.66.0/24
-```
+## 七、附加功能建议
 
-##### 可配置项示例
+- 提供将 CR 转注解的转换工具或 Webhook。
+- 支持将服务端点信息（如 port、protocol）一起编码进注解。
+- 考虑为 StatefulSet 增强 Pod 注解的自动继承机制。
+- 添加协议类型验证，确保只支持 TCP 和 UDP。
 
-```yaml
-env:
-  - name: SIDECAR_MAPPED_SERVICES
-    value: "mysql,redis"
-  - name: SIDECAR_IP_RANGE
-    value: "127.0.66.0/24"
-```
+## 八、总结
 
-#### frpc 注册器
-
-* Sidecar 会读取本地 APIServer 中所有 Router 状态；
-* 找到支持所需服务（如 `mysql`）的 Router；
-* 为每个需要映射或发布的服务执行两种 frpc 动作：
-  1. Dial（stcp）模式：在 Pod 本地创建 frpc 进程，将远端服务映射到 `127.0.66.x:PORT` 本地端口，使应用客户端能够访问；
-  2. Bind（visitor）模式：在 Router 端以 visitor 方式注册并发布 Pod 内部服务，使其他节点的流量能够被路由至该服务；
-* 将所有映射和发布的结果（端口、连接状态等）写入本地缓存，以供后续 DNS 劫持和状态监控使用。
-
-#### DNS 劫持器
-
-* 在 Pod 内监听 `127.0.0.2:53/udp`，劫持 `mysql.default.svc` 等服务名称；
-* 返回 `127.0.66.x` 范围内的本地代理地址（由 `SIDECAR_IP_RANGE` 指定），达到劫持服务访问的目的；
-* 结合 `dnsPolicy: None + dnsConfig.nameservers=[127.0.0.2]` 生效。
-
----
-
-## 4. 数据与资源流动
-
-```text
-1. 云端控制器 -> 所有节点 APIServer
-   写入 Router 配置（每个节点一个 CR）
-
-2. 节点 Router -> 本地 APIServer
-   拉取 Router 配置，运行 frps，状态上报到 CR.status
-
-3. 节点 Syncer -> 本地 APIServer
-   拉取其他节点 APIServer 的 Router 状态，同步至本节点
-
-4. Pod Sidecar -> 本地 APIServer
-   Watch 所有 Router 状态，根据服务需求选择 Router
-
-5. Sidecar -> Router (frps)
-   以 frpc 方式连接，建立 stcp 映射，并在本地监听
-
-6. Sidecar DNS Server -> Pod 内服务
-   拦截服务名请求，返回 frpc 本地监听地址（127.0.66.1）
-```
-
----
-
-## 5. 服务映射示例流程
-
-> Pod 需访问远端 `mysql` 数据库服务
-
-1. 用户设置环境变量 `SIDECAR_MAPPED_SERVICES=mysql` 和 `SIDECAR_IP_RANGE=127.0.66.0/24`；
-2. Sidecar 查询 APIServer，发现某个 Router 提供了 `mysql`；
-3. Sidecar 启动 frpc，映射连接至本地 `127.0.66.x:3306`；
-4. Sidecar DNS 返回 `127.0.66.x` 给服务名称 `mysql.default.svc`；
-5. 应用访问 `mysql.default.svc:3306` 实际连接本地映射端口。
-
----
-
-## 6. CRD 设计（简略）
-
-### Router CR
-
-```yaml
-apiVersion: edge.example.com/v1
-kind: Router
-metadata:
-  name: node-1
-spec:
-  frps:
-    bindPort: 7000
-    dashboardPort: 7500
-  # 可选：明确声明此 Router 节点能代理的服务列表
-  # advertisedServices:
-  #   - name: mysql
-  #     port: 3306
-  #   - name: redis
-  #     port: 6379
-status:
-  # 报告此 Router (frps) 当前实际代理的服务端口
-  # 这些通常由连接上来的 frpc (Sidecar) 动态注册确定
-  activeServices:
-    - name: mysql # 服务名，应与 frpc 注册时提供的元数据关联
-      localPort: 7001 # frps 监听的端口 (用于 stcp)
-      targetPort: 3306 # 原始目标服务端口 (供参考)
-  # 报告当前连接到此 Router (frps) 的客户端 (Sidecar/frpc)
-      clients:
-    - id: pod-abc-mysql # 唯一客户端标识 (e.g., podName-serviceName)
-      type: stcp # 连接类型
-      remoteAddr: <frpc_client_ip>:<frpc_client_port> # frpc 客户端地址
-      localAddr: 127.0.66.1:3306 # frpc 在 Pod 内监听的地址和端口
-      serviceName: mysql # 映射的服务名
-      # 可以添加更多状态，如连接时间、流量等
-```
-
----
-
-## 7. 安全性与可扩展性建议
-
-* 使用 `stcp` 通信模式，启用密钥加密通信；
-* 为 `frpc` 注册添加服务名与 token 认证；
-* 支持 Sidecar 的热更新服务列表；
-* Router 可支持负载均衡策略和断链重连；
-* **评估 Syncer 同步延迟对服务可用性的影响**；
-
----
+通过在 Pod 注解中记录服务注册与导入信息，包括协议类型等详细配置，实现轻量、灵活、无侵入的多集群服务注册与发现，适配边缘场景下的网络不稳定与自治需求。
+后续可结合服务网格、服务目录系统进一步扩展，例如与 Envoy SDS、CoreDNS、自定义注册表结合。

@@ -1,0 +1,17 @@
+services:
+    - cluster: cluster-a
+      name: backend
+      namespace: default
+      ports:
+        - name: http
+          port: 80
+          protocol: TCP
+          targetport: 8080
+    - cluster: cluster-a
+      name: api-internal
+      namespace: default
+      ports:
+        - name: grpc
+          port: 9000
+          protocol: TCP
+          targetport: 9000

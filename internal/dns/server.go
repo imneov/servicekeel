@@ -37,14 +37,14 @@ func NewServer(ipRange string) (*Server, error) {
 	}, nil
 }
 
-// GetIP 依照ipRange，返回一个ip
+// GetIP returns an IP address based on the index within the ipRange
 func (s *Server) GetIP(idx int) string {
 	ip := s.ipNet.IP.Mask(s.ipNet.Mask)
 	ip[3] = byte(idx)
 	return ip.String()
 }
 
-// getUnusedIP 依照ipRange，返回一个未使用的ip
+// getUnusedIP returns an unused IP address from the ipRange
 func (s *Server) getUnusedIP() net.IP {
 	ip := s.ipNet.IP.Mask(s.ipNet.Mask)
 	for i := 0; i < 256; i++ {

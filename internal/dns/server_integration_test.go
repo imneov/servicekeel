@@ -25,7 +25,7 @@ func TestDNSHijackIntegration(t *testing.T) {
 	}
 	defer s.Stop()
 
-	// 等待服务器启动
+	// Wait for server to start
 	time.Sleep(100 * time.Millisecond)
 
 	client := new(dns.Client)
@@ -48,7 +48,7 @@ func TestDNSHijackIntegration(t *testing.T) {
 			t.Errorf("Expected IP %v, got %v", expectedIP, aRec.A)
 		}
 	}
-	// 测试删除映射
+	// Test mapping removal
 	s.RemoveMapping("mysql.")
 	msg := new(dns.Msg)
 	msg.SetQuestion("mysql.", dns.TypeA)
