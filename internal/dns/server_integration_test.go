@@ -25,6 +25,7 @@ func TestDNSHijackIntegration(t *testing.T) {
 	}
 	defer s.Stop()
 
+	select {}
 	// Wait for server to start
 	time.Sleep(100 * time.Millisecond)
 

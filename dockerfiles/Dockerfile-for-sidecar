@@ -5,9 +5,7 @@ WORKDIR /building
 
 RUN make sidecar
 
-FROM alpine:3.16.3
-
-RUN apk add --no-cache tzdata
+FROM tkeelio/kube-frpc:0.61.2-20250507
 
 COPY --from=building /building/bin/sidecar /usr/bin/sidecar
 

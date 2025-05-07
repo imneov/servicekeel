@@ -20,6 +20,7 @@ import (
 
 // CLI flags
 var (
+	flagVerssion    = flag.String("version", "", "service keel version")
 	flagDNSAddr     = flag.String("dns-addr", "", "DNS listen address (env: SIDECAR_DNS_ADDR), e.g., 127.0.0.2:53")
 	flagMetricsAddr = flag.String("metrics-addr", "", "address for metrics and health endpoints (env: METRICS_ADDR), default :8080")
 	flagIPRange     = flag.String("ip-range", "", "CIDR notation IP range for mapping (env: SIDECAR_IP_RANGE)")

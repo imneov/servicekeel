@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chrony-config
+data:
+  chrony.conf: |
+    # Allow NTP client access from local network
+    allow all
+    
+    # Serve time even if not synchronized to a time source
+    local
+    
+    # Record the rate at which the system clock gains/losses time
+    driftfile /var/lib/chrony/drift
+    
+    # Enable kernel synchronization of the real-time clock (RTC)
+    rtcsync
+    
+    # Log settings
+    log measurements statistics tracking
+    
+    # Log file location
+    logdir /var/log/chrony 

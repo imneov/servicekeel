@@ -152,7 +152,7 @@ func (r *Controller) GetAllExportedEndpoints() map[string]*EndpointInfo {
 }
 
 func ServiceName(svc config.ServiceConfig, port config.Port) string {
-	return fmt.Sprintf("%s.%s.%s", svc.Name, svc.Namespace, svc.Cluster)
+	return fmt.Sprintf("%s.%s.svc.%s", svc.Name, svc.Namespace, svc.Cluster)
 }
 
 func EndpointName(svc config.ServiceConfig, port config.Port) string {

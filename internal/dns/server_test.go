@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -158,4 +159,82 @@ func TestNoMapping(t *testing.T) {
 	if resp.Rcode != mdns.RcodeNameError {
 		t.Errorf("Expected NXDOMAIN (RcodeNameError); got %d", resp.Rcode)
 	}
+}
+
+func TestAddMappingAndRemoveMapping(t *testing.T) {
+	domainTmpl := "mysql-%d.ns"
+	IPtmpl := "127.0.66.%d"
+	s, err := NewServer("127.0.66.0/24")
+	if err != nil {
+		t.Fatalf("NewServer() returned error: %v", err)
+	}
+
+	for i := 0; i < 10; i++ {
+		s.AddMapping(fmt.Sprintf(domainTmpl, i))
+	}
+
+	// start server
+	if err := s.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer s.Stop()
+	time.Sleep(50 * time.Millisecond)
+
+	addr := s.server.PacketConn.LocalAddr().String()
+	for i := 0; i < 10; i++ {
+		msg := new(mdns.Msg)
+		qname := fmt.Sprintf(domainTmpl, i)
+		msg.SetQuestion(qname+".", mdns.TypeA)
+		client := new(mdns.Client)
+		resp, _, err := client.Exchange(msg, addr)
+		if err != nil {
+			t.Fatalf("DNS query failed: %v", err)
+		}
+		if len(resp.Answer) != 1 {
+			t.Fatalf("Expected 1 answer; got %d", len(resp.Answer))
+		}
+		aRec, ok := resp.Answer[0].(*mdns.A)
+		if !ok {
+			t.Fatalf("Expected A record; got %T", resp.Answer[0])
+		}
+		IP := fmt.Sprintf(IPtmpl, i)
+		customIP := net.ParseIP(IP)
+		if !aRec.A.Equal(customIP) {
+			t.Errorf("Mapping failed: got %s; (%s)want %s", aRec.A.String(), IP, customIP.String())
+		}
+	}
+
+	for i := 0; i < 10; i = i + 2 {
+		// remove "127.0.66.0/2/4/6/8"
+		s.RemoveMapping(fmt.Sprintf(domainTmpl, i))
+	}
+
+	qname := "redis-127.0.66.0"
+	s.AddMapping(qname) // 127.0.66.0
+	qname = "redis-127.0.66.2"
+	s.AddMapping(qname) // 127.0.66.2
+	qname = "redis-127.0.66.4"
+	s.AddMapping(qname) // 127.0.66.4
+	qname = "redis-127.0.66.6"
+	s.AddMapping(qname) // 127.0.66.6
+	msg := new(mdns.Msg)
+	msg.SetQuestion(qname+".", mdns.TypeA)
+	client := new(mdns.Client)
+	resp, _, err := client.Exchange(msg, addr)
+	if err != nil {
+		t.Fatalf("DNS query failed: %v", err)
+	}
+	if len(resp.Answer) != 1 {
+		t.Fatalf("Expected 1 answer; got %d", len(resp.Answer))
+	}
+	aRec, ok := resp.Answer[0].(*mdns.A)
+	if !ok {
+		t.Fatalf("Expected A record; got %T", resp.Answer[0])
+	}
+	IP := "127.0.66.2"
+	customIP := net.ParseIP(IP)
+	if !aRec.A.Equal(customIP) {
+		t.Errorf("Mapping failed: got %s; (%s)want %s", aRec.A.String(), IP, customIP.String())
+	}
+
 }

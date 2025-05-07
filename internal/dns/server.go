@@ -60,6 +60,9 @@ func (s *Server) getUnusedIP() net.IP {
 
 // AddMapping registers a fixed IP for the given DNS query name.
 func (s *Server) AddMapping(name string) (net.IP, error) {
+	if !strings.HasSuffix(name, ".") {
+		name = name + "."
+	}
 	if ip, ok := s.mappings[name]; ok {
 		return ip, nil
 	}
@@ -77,7 +80,13 @@ func (s *Server) AddMapping(name string) (net.IP, error) {
 
 // AddMappingAlias registers a fixed IP for the given DNS query name.
 func (s *Server) AddMappingAlias(name string, alias ...string) error {
+	if !strings.HasSuffix(name, ".") {
+		name = name + "."
+	}
 	for _, a := range alias {
+		if !strings.HasSuffix(a, ".") {
+			a = a + "."
+		}
 		s.aliases[a] = name
 	}
 	return nil
@@ -85,6 +94,9 @@ func (s *Server) AddMappingAlias(name string, alias ...string) error {
 
 // RemoveMapping removes a mapping for the given DNS query name.
 func (s *Server) RemoveMapping(name string) (net.IP, error) {
+	if !strings.HasSuffix(name, ".") {
+		name = name + "."
+	}
 	ip, ok := s.mappings[name]
 	if !ok {
 		log.Printf("no mapping for %s", name)
@@ -141,7 +153,7 @@ func (s *Server) Start(address string) error {
 // handleRequest processes incoming DNS queries and returns A records based on mappings.
 func (s *Server) handleRequest(w mdns.ResponseWriter, req *mdns.Msg) {
 	// log incoming query
-	log.Printf("DNS request received: %v from %v", req.Question, w.RemoteAddr())
+	log.Printf("DNS request received: %v from %v, mappings: %v", req.Question, w.RemoteAddr(), s.mappings)
 	msg := new(mdns.Msg)
 	msg.SetReply(req)
 	for _, q := range req.Question {

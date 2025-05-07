@@ -50,7 +50,7 @@ func NewFRPClient(name string, args *EndpointInfo) (*FRPClient, error) {
 			"stcp",
 			"visitor",
 			"-n", name,
-			"--server-name", args.ServiceName,
+			"--server-name", name,
 			"--sk", args.FrpSecretKey,
 			"--bind-addr", args.MappedIP,
 			"--bind-port", args.ServicePort,

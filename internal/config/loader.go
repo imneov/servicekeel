@@ -23,7 +23,7 @@ func LoadConfig() (*Config, error) {
 		klog.Errorf("failed to read main configuration file: %v", err)
 		config = Config{
 			DNS: DNSConfig{
-				IPRange: "127.0.0.0/24",
+				IPRange: "127.0.66.0/24",
 				Addr:    "127.0.0.2:53",
 			},
 			Metrics: MetricsConfig{

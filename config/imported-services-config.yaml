@@ -1,5 +1,5 @@
 services:
-    - cluster: cluster-a
+    - cluster: cluster-a.local
       name: backend
       namespace: default
       ports:

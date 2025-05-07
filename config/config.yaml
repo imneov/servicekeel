@@ -1,0 +1,5 @@
+dns:
+    addr: 127.0.0.1:53
+    iprange: 127.0.0.0/24
+metrics:
+    addr: :8080
