@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -33,6 +34,19 @@ func LoadConfig() (*Config, error) {
 			ImportedServices: ServiceList{},
 		}
 	}
+
+	// 读取 resolv.conf 中的 search 域
+	searchDomains, err := parseResolvConf()
+	if err != nil {
+		log.Printf("Warning: Failed to read resolv.conf: %v", err)
+		// 使用默认的 search 域
+		searchDomains = []string{
+			"default.svc.cluster.local",
+			"svc.cluster.local",
+			"cluster.local",
+		}
+	}
+	config.DNS.SearchDomains = searchDomains
 
 	// Read exported services configuration
 	err = ReadExportedServicesConfig(&config)

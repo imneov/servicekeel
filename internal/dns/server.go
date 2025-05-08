@@ -19,6 +19,7 @@ type Server struct {
 	aliases  map[string]string
 	mappings map[string]net.IP
 	usedIPs  map[string]struct{}
+	searches []string
 }
 
 // NewServer creates a new DNS hijacking server for the given IP range.
@@ -114,6 +115,13 @@ func (s *Server) RemoveMapping(name string) (net.IP, error) {
 	return ip, nil
 }
 
+// SetSearchDomains sets the search domains for DNS resolution
+func (s *Server) SetSearchDomains(domains []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.searches = domains
+}
+
 // Start begins listening for DNS queries on the given UDP address.
 // It binds the UDP socket first to catch errors, logs the binding, then serves in the background.
 func (s *Server) Start(address string) error {
@@ -152,53 +160,78 @@ func (s *Server) Start(address string) error {
 
 // handleRequest processes incoming DNS queries and returns A records based on mappings.
 func (s *Server) handleRequest(w mdns.ResponseWriter, req *mdns.Msg) {
-	// log incoming query
-	log.Printf("DNS request received: %v from %v, mappings: %v", req.Question, w.RemoteAddr(), s.mappings)
 	msg := new(mdns.Msg)
 	msg.SetReply(req)
+
 	for _, q := range req.Question {
 		if q.Qtype != mdns.TypeA {
 			continue
 		}
+
 		log.Printf("Handling DNS A query for %s", q.Name)
+
+		// 尝试直接匹配
 		s.mu.RLock()
 		mappedIP, ok := s.mappings[q.Name]
-		if !ok {
-			mappedIP, ok = s.mappings[s.aliases[q.Name]]
-		}
 		s.mu.RUnlock()
+
+		// 如果直接匹配失败，尝试别名
 		if !ok {
-			if idx := strings.Index(q.Name, "."); idx > 0 {
-				bare := q.Name[:idx+1]
-				s.mu.RLock()
-				mappedIP, ok = s.mappings[bare]
-				s.mu.RUnlock()
+			s.mu.RLock()
+			aliasTarget, aliasOk := s.aliases[q.Name]
+			if aliasOk {
+				mappedIP, ok = s.mappings[aliasTarget]
 			}
+			s.mu.RUnlock()
 		}
+
+		// 如果直接匹配和别名都失败，尝试使用 search 域
 		if !ok {
+			s.mu.RLock()
+			// 获取主机名部分（第一段）
+			hostPart := q.Name
+
+			// 尝试每个 search 域
+			for _, search := range s.searches {
+				fullName := JoinDomain(hostPart, search)
+				if ip, exists := s.mappings[fullName]; exists {
+					mappedIP = ip
+					ok = true
+					log.Printf("Found match using search domain: %s -> %s", q.Name, fullName)
+					break
+				}
+			}
+			s.mu.RUnlock()
+		}
+
+		if ok {
+			rr := &mdns.A{
+				Hdr: mdns.RR_Header{
+					Name:   q.Name,
+					Rrtype: mdns.TypeA,
+					Class:  mdns.ClassINET,
+					Ttl:    5,
+				},
+				A: mappedIP,
+			}
+			msg.Answer = append(msg.Answer, rr)
+			log.Printf("Mapped DNS %s to IP %s", q.Name, mappedIP)
+		} else {
 			log.Printf("No DNS mapping for %s, skipping", q.Name)
-			continue
 		}
-		rr := &mdns.A{
-			Hdr: mdns.RR_Header{
-				Name:   q.Name,
-				Rrtype: mdns.TypeA,
-				Class:  mdns.ClassINET,
-				Ttl:    5,
-			},
-			A: mappedIP,
-		}
-		msg.Answer = append(msg.Answer, rr)
-		log.Printf("Mapped DNS %s to IP %s", q.Name, mappedIP)
 	}
+
+	// 只有在真的没找到答案时才设置 NXDOMAIN
 	if len(msg.Answer) == 0 {
-		// no mapping found: return NXDOMAIN
 		msg.Rcode = mdns.RcodeNameError
+	} else {
+		msg.Rcode = mdns.RcodeSuccess // 明确设置成功状态码
 	}
+
 	if err := w.WriteMsg(msg); err != nil {
 		log.Printf("Failed to write DNS response: %v", err)
 	}
-	log.Printf("Responded with %d answers", len(msg.Answer))
+	log.Printf("Responded with %d answers and code %d", len(msg.Answer), msg.Rcode)
 }
 
 // Stop stops the DNS server and cleans up resources.
@@ -214,4 +247,14 @@ func (s *Server) ServeDNS(w mdns.ResponseWriter, req *mdns.Msg) {
 	msg := new(mdns.Msg)
 	msg.SetReply(req)
 	w.WriteMsg(msg)
+}
+
+func JoinDomain(domain, search string) string {
+	if !strings.HasSuffix(domain, ".") {
+		domain = domain + "."
+	}
+	if !strings.HasSuffix(search, ".") {
+		search = search + "."
+	}
+	return domain + search
 }

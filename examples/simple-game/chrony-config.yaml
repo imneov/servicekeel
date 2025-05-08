@@ -20,4 +20,10 @@ data:
     log measurements statistics tracking
     
     # Log file location
-    logdir /var/log/chrony 
+    logdir /var/log/chrony
+    
+    # Command socket
+    cmdport 0
+    
+    # Don't try to adjust system clock
+    makestep 0 0

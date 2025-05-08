@@ -72,7 +72,7 @@ func main() {
 	klog.Infof("Configuration: \n%v", cfg.String())
 
 	// Start DNS hijacking server
-	dnsServer, err := startDNSServer(cfg.DNS.IPRange, cfg.DNS.Addr)
+	dnsServer, err := startDNSServer(cfg.DNS.IPRange, cfg.DNS.Addr, cfg.DNS.SearchDomains)
 	if err != nil {
 		log.Fatalf("Failed to start DNS hijacking server: %v", err)
 	}
@@ -108,11 +108,12 @@ func main() {
 }
 
 // startDNSServer creates and starts the DNS hijacking server for sidecar.
-func startDNSServer(ipRange, addr string) (*dns.Server, error) {
+func startDNSServer(ipRange, addr string, searchDomains []string) (*dns.Server, error) {
 	server, err := dns.NewServer(ipRange)
 	if err != nil {
 		return nil, err
 	}
+	server.SetSearchDomains(searchDomains)
 	if err := server.Start(addr); err != nil {
 		return nil, err
 	}

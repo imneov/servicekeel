@@ -238,3 +238,135 @@ func TestAddMappingAndRemoveMapping(t *testing.T) {
 	}
 
 }
+
+func TestSearchDomains(t *testing.T) {
+	ipRange := "127.0.66.0/24"
+	s, err := NewServer(ipRange)
+	if err != nil {
+		t.Fatalf("NewServer() returned error: %v", err)
+	}
+
+	// 设置 search 域
+	searchDomains := []string{
+		"default.svc.cluster-a.local",
+		"svc.cluster-a.local",
+		"cluster-a.local",
+	}
+	s.SetSearchDomains(searchDomains)
+
+	// 注册一个完整的域名映射
+	fullName := "test.default.svc.cluster-a.local."
+	wantIP, err := s.AddMapping(fullName)
+	if err != nil {
+		t.Fatalf("AddMapping() returned error: %v", err)
+	}
+
+	// 启动服务器
+	if err := s.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer s.Stop()
+	time.Sleep(50 * time.Millisecond)
+
+	addr := s.server.PacketConn.LocalAddr().String()
+	client := new(mdns.Client)
+
+	// 测试用例：使用不同的域名格式查询
+	testCases := []struct {
+		name     string
+		query    string
+		expected bool
+	}{
+		// {"full name", fullName, true},
+		{"short name", "test.", true},
+		{"partial name", "test.default.", true},
+		{"non-existent", "nonexistent.", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := new(mdns.Msg)
+			msg.SetQuestion(tc.query, mdns.TypeA)
+			resp, _, err := client.Exchange(msg, addr)
+			if err != nil {
+				t.Fatalf("DNS query failed: %v", err)
+			}
+
+			if tc.expected {
+				if len(resp.Answer) != 1 {
+					t.Fatalf("Expected 1 answer %s; got %d", tc.query, len(resp.Answer))
+				}
+				aRec, ok := resp.Answer[0].(*mdns.A)
+				if !ok {
+					t.Fatalf("Expected A record; got %T", resp.Answer[0])
+				}
+				if !aRec.A.Equal(wantIP) {
+					t.Errorf("Got IP %s; want %s", aRec.A.String(), wantIP.String())
+				}
+			} else {
+				if len(resp.Answer) != 0 {
+					t.Fatalf("Expected 0 answers; got %d", len(resp.Answer))
+				}
+				if resp.Rcode != mdns.RcodeNameError {
+					t.Errorf("Expected NXDOMAIN (RcodeNameError); got %d", resp.Rcode)
+				}
+			}
+		})
+	}
+}
+
+func TestSearchDomainsOrder(t *testing.T) {
+	ipRange := "127.0.66.0/24"
+	s, err := NewServer(ipRange)
+	if err != nil {
+		t.Fatalf("NewServer() returned error: %v", err)
+	}
+
+	// 设置 search 域
+	searchDomains := []string{
+		"default.svc.cluster-a.local",
+		"svc.cluster-a.local",
+		"cluster-a.local",
+	}
+	s.SetSearchDomains(searchDomains)
+
+	// 注册多个不同后缀的域名映射
+	domains := map[string]net.IP{
+		"test.default.svc.cluster-a.local.": net.ParseIP("127.0.66.1"),
+		"test.svc.cluster-a.local.":         net.ParseIP("127.0.66.2"),
+		"test.cluster-a.local.":             net.ParseIP("127.0.66.3"),
+	}
+
+	for domain, ip := range domains {
+		s.mappings[domain] = ip
+	}
+
+	// 启动服务器
+	if err := s.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer s.Stop()
+	time.Sleep(50 * time.Millisecond)
+
+	addr := s.server.PacketConn.LocalAddr().String()
+	client := new(mdns.Client)
+
+	// 测试短域名查询应该匹配第一个有效的 search 域
+	msg := new(mdns.Msg)
+	msg.SetQuestion("test.", mdns.TypeA)
+	resp, _, err := client.Exchange(msg, addr)
+	if err != nil {
+		t.Fatalf("DNS query failed: %v", err)
+	}
+
+	if len(resp.Answer) != 1 {
+		t.Fatalf("Expected 1 answer; got %d", len(resp.Answer))
+	}
+	aRec, ok := resp.Answer[0].(*mdns.A)
+	if !ok {
+		t.Fatalf("Expected A record; got %T", resp.Answer[0])
+	}
+	if !aRec.A.Equal(domains["test.default.svc.cluster-a.local."]) {
+		t.Errorf("Got IP %s; want %s", aRec.A.String(), domains["test.default.svc.cluster-a.local."].String())
+	}
+}

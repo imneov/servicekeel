@@ -14,10 +14,10 @@ metadata:
               port: 8080
               protocol: TCP
               targetport: 8080
-            - name: udp
-              port: 8081
+            - name: ntp
+              port: 123
               protocol: UDP
-              targetport: 8081
+              targetport: 123
         - cluster: cluster-a.local
           name: simple-server2
           namespace: default
@@ -26,10 +26,10 @@ metadata:
               port: 8080
               protocol: TCP
               targetport: 8080
-            - name: udp
-              port: 8081
+            - name: ntp
+              port: 123
               protocol: UDP
-              targetport: 8081
+              targetport: 123
 spec:
   dnsPolicy: "None"
   dnsConfig:
@@ -39,9 +39,12 @@ spec:
       - "default.svc.cluster-a.local"
       - "svc.cluster-a.local"
       - "cluster-a.local"
+    options:
+      - name: ndots
+        value: "5"
   containers:
     - name: client
-      image: busybox:latest
+      image: alpine:latest
       command:
         - sh
         - -c
@@ -50,22 +53,26 @@ spec:
             echo "========================="
             echo "Testing simple-server..."
             echo "TCP Test:"
-            curl -v http://simple-server.default:8080/
+            wget -q -O- http://simple-server.default:8080/
             echo -e "\nHealth Check:"
-            curl -v http://simple-server.default:8080/health
+            wget -q -O- http://simple-server.default:8080/health
             
             echo -e "\nUDP Test:"
-            echo "Hello from client $(date)" | nc -u -w 1 simple-server.default 8081
+            echo "Testing UDP port 123..."
+            echo "test" | nc -u -w 1 simple-server.default 123
+            echo "UDP test completed"
             
             echo -e "\n========================="
             echo "Testing simple-server2..."
             echo "TCP Test:"
-            curl -v http://simple-server2.default:8080/
+            wget -q -O- http://simple-server2.default:8080/
             echo -e "\nHealth Check:"
-            curl -v http://simple-server2.default:8080/health
+            wget -q -O- http://simple-server2.default:8080/health
             
             echo -e "\nUDP Test:"
-            echo "Hello from client $(date)" | nc -u -w 1 simple-server2.default 8081
+            echo "Testing UDP port 123..."
+            echo "test" | nc -u -w 1 simple-server2.default 123
+            echo "UDP test completed"
             
             echo -e "\n=========================\n"
             sleep 5

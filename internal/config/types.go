@@ -46,8 +46,9 @@ func (c *Config) String() string {
 }
 
 type DNSConfig struct {
-	IPRange string `json:"ipRange"`
-	Addr    string `json:"addr"`
+	IPRange       string   `json:"ipRange"`
+	Addr          string   `json:"addr"`
+	SearchDomains []string `json:"searchDomains"`
 }
 
 type MetricsConfig struct {
