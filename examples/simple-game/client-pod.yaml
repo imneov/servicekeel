@@ -44,7 +44,7 @@ spec:
         value: "5"
   containers:
     - name: client
-      image: alpine:latest
+      image: nicolaka/netshoot:latest
       command:
         - sh
         - -c
@@ -53,9 +53,9 @@ spec:
             echo "========================="
             echo "Testing simple-server..."
             echo "TCP Test:"
-            wget -q -O- http://simple-server.default:8080/
+            curl -s http://simple-server.default:8080/
             echo -e "\nHealth Check:"
-            wget -q -O- http://simple-server.default:8080/health
+            curl -s http://simple-server.default:8080/health
             
             echo -e "\nUDP Test:"
             echo "Testing UDP port 123..."
@@ -65,9 +65,9 @@ spec:
             echo -e "\n========================="
             echo "Testing simple-server2..."
             echo "TCP Test:"
-            wget -q -O- http://simple-server2.default:8080/
+            curl -s http://simple-server2.default:8080/
             echo -e "\nHealth Check:"
-            wget -q -O- http://simple-server2.default:8080/health
+            curl -s http://simple-server2.default:8080/health
             
             echo -e "\nUDP Test:"
             echo "Testing UDP port 123..."

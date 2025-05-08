@@ -1,19 +1,19 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: nginx-config
+  name: nginx-config2
 data:
   default.conf: |
     server {
         listen 8080;
         
         location / {
-            return 200 '{"server": "S1", "status": "success", "message": "Hello from ServiceKeel!", "timestamp": "$date_gmt"}';
+            return 200 '{"server": "S2", "status": "success", "message": "Hello from ServiceKeel!", "timestamp": "$date_gmt"}';
             add_header Content-Type application/json;
         }
         
         location /health {
-            return 200 '{"server": "S1", "status": "healthy", "timestamp": "$date_gmt"}';
+            return 200 '{"server": "S2", "status": "healthy", "timestamp": "$date_gmt"}';
             add_header Content-Type application/json;
         }
     } 
