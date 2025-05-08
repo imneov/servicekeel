@@ -170,7 +170,12 @@ func (s *Server) handleRequest(w mdns.ResponseWriter, req *mdns.Msg) {
 	msg := new(mdns.Msg)
 	msg.SetReply(req)
 
+	isAAAAQuery := false
 	for _, q := range req.Question {
+		if q.Qtype == mdns.TypeAAAA {
+			isAAAAQuery = true
+			continue
+		}
 		if q.Qtype != mdns.TypeA {
 			log.Printf("request ID %d with DNS %s(%s) is not A query, skipping", req.Id, q.Name, q.Qtype)
 			continue
@@ -234,7 +239,13 @@ func (s *Server) handleRequest(w mdns.ResponseWriter, req *mdns.Msg) {
 
 	// 只有在真的没找到答案时才设置 NXDOMAIN
 	if len(msg.Answer) == 0 {
-		msg.Rcode = mdns.RcodeNameError
+		if isAAAAQuery {
+			log.Printf("Request ID %d with 	AAAA query for %s, setting Rcode to Success", req.Id, req.Question[0].Name)
+			msg.Rcode = mdns.RcodeSuccess // IPv6 查询没有找到答案时设置为 NXDOMAIN
+		} else {
+			log.Printf("Request ID %d with A query for %s, setting Rcode to NameError", req.Id, req.Question[0].Name)
+			msg.Rcode = mdns.RcodeNameError // 明确设置成功状态码
+		}
 	} else {
 		msg.Rcode = mdns.RcodeSuccess // 明确设置成功状态码
 	}

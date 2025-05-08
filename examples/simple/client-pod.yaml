@@ -59,7 +59,7 @@ spec:
             
             echo -e "\nUDP Test:"
             echo "Testing UDP port 123..."
-            echo "test" | nc -4 -u -w 1 simple-server.default 123
+            echo "test" | nc -u -w 1 simple-server.default 123
             echo "UDP test completed"
             
             # echo -e "\n========================="
