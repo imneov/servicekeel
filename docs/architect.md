@@ -14,60 +14,121 @@
 
 - 服务注册：根据 Pod 被哪些 Service 选中，在其注解中记录应导出的服务名称（包含命名空间、集群信息和协议类型）。
 - 服务导入：在 Pod 注解中声明该 Pod 需要访问的服务，可指定 namespace、cluster 和协议类型。
-- 边缘代理 Sidecar/Agent：读取注解信息，完成服务注册与发现的本地逻辑，支持不同协议（TCP/UDP）的处理。
+- 边缘代理 Sidecar：读取注解信息，完成服务注册与发现的本地逻辑，支持不同协议（TCP/UDP）的处理。
 
 ## 三、关键定义
 
-- `edge.io/exported-services`：表示该 Pod 所需注册的服务列表，由 Service selector 决定。
-- `edge.io/imported-services`：表示该 Pod 需访问的服务列表，由用户或 Controller 指定。
+- `servicekeel.io/exported-services`：表示该 Pod 所需注册的服务列表，由 Service selector 决定。
+- `servicekeel.io/imported-services`：表示该 Pod 需访问的服务列表，由用户或 Controller 指定。
 
-注解值格式统一为 JSON 序列化的字符串，例如：
+注解值格式统一为 YAML 序列化的字符串，例如：
 
-```json
-{
-  "services": [
-    {
-      "name": "service-name-1",
-      "namespace": "namespace-1",
-      "cluster": "cluster-1",
-      "ports": [
-        {"name": "http", "port": 8080, "targetPort": 8080, "protocol": "TCP"},
-        {"name": "metrics", "port": 9090, "targetPort": 9090, "protocol": "UDP"}
-      ]
-    },
-    {
-      "name": "service-name-2",
-      "namespace": "namespace-2",
-      "cluster": "cluster-1",
-      "ports": [
-        {"name": "grpc", "port": 9000, "targetPort": 9000, "protocol": "TCP"}
-      ]
-    }
-  ]
-}
+```yaml
+services:
+  - cluster: cluster-a.local
+    name: simple-server
+    namespace: default
+    ports:
+      - name: tcp
+        port: 8080
+        protocol: TCP
+        targetport: 8080
+      - name: ntp
+        port: 123
+        protocol: UDP
+        targetport: 123
 ```
+
+
 
 ### 3.1 端口配置说明
 
 每个服务的端口配置包含以下字段：
-- `name`：端口名称，用于标识用途（如 http、metrics、grpc 等）
+- `name`：端口名称，用于标识用途（如 tcp、ntp 等）
 - `port`：服务对外暴露的端口
-- `targetPort`：容器内部实际监听的端口
+- `targetport`：容器内部实际监听的端口
 - `protocol`：传输协议，支持 "TCP" 或 "UDP"
 
 ## 四、设计细节
+
+```mermaid
+graph TB
+    subgraph "集群"
+        subgraph ControlPlane[控制面]
+            direction TB
+            APIServer[<div style='height: 50px'>API Server</div>]
+            InvisibleNode1[<div style='height: 50px'> </div>]:::invisible
+            Controller[<div style='height: 50px'>ServiceKeel Controller</div>]
+            InvisibleNode2[<div style='height: 50px'> </div>]:::invisible
+        end
+
+        subgraph Node1[节点 1]
+            subgraph Pod1[Pod 1]
+                App1[应用容器]
+                Sidecar1[ServiceKeel Sidecar<br/>DNS: 127.0.0.2:53]
+            end
+            Router1[Router<br/>/tmp/frp.sock]
+        end
+
+        subgraph Node2[节点 2]
+            subgraph Pod2[Pod 2]
+                App2[应用容器]
+                Sidecar2[ServiceKeel Sidecar<br/>DNS: 127.0.0.2:53]
+            end
+            Router2[Router<br/>/tmp/frp.sock]
+        end
+    end
+
+    %% 控制面连接
+    APIServer <--> Controller
+
+    %% 节点内部连接
+    App1 <--> Sidecar1
+    Sidecar1 <-->|"Unix Socket"| Router1
+    Sidecar1 -->|"DNS 解析"| App1
+
+    App2 <--> Sidecar2
+    Sidecar2 <-->|"Unix Socket"| Router2
+    Sidecar2 -->|"DNS 解析"| App2
+
+    %% 节点间连接
+    Router1 --> Router2
+    Router2 --> Router1
+
+    %% 注解
+    Pod1 -.->|exported-services| Sidecar1
+    Pod1 -.->|imported-services| Sidecar1
+    Pod2 -.->|exported-services| Sidecar2
+    Pod2 -.->|imported-services| Sidecar2
+
+    %% 样式
+    classDef cluster fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef component fill:#bbf,stroke:#333,stroke-width:1px;
+    classDef annotation fill:#fbb,stroke:#333,stroke-width:1px,stroke-dasharray: 5 5;
+    classDef pod fill:#dfd,stroke:#333,stroke-width:1px;
+    classDef node fill:#fef,stroke:#333,stroke-width:1px;
+    classDef controlPlane fill:#ffd,stroke:#333,stroke-width:1px;
+    classDef invisible fill:none,stroke:none;
+
+    class APIServer,Controller,App1,Sidecar1,Router1,App2,Sidecar2,Router2 component;
+    class Pod1,Pod2 pod;
+    class Node1,Node2 node;
+    class ControlPlane controlPlane;
+    class InvisibleNode1,InvisibleNode2 invisible;
+    class exported-services,imported-services annotation;
+```
 
 ### 4.1 服务注册流程
 
 1. Controller 监听 Service 与 Pod 变更。
 2. 判断 Service 的 selector 是否匹配某个 Pod。
-3. 若匹配，将服务信息（包括协议类型）添加到 Pod 的 `edge.io/exported-services` 注解中。
+3. 若匹配，将服务信息（包括协议类型）添加到 Pod 的 `servicekeel.io/exported-services` 注解中。
 
 ### 4.2 服务导入流程
 
-1. 用户可直接在 Pod spec 中通过 `edge.io/imported-services` 注解声明所需访问的服务，格式同导出。
-2. 注解支持省略 namespace 与 cluster（默认为当前）。
-3. 边缘 Agent 负责将导入服务建立为本地代理，根据协议类型（TCP/UDP）配置相应的代理规则。
+1. 用户可直接在 Pod spec 中通过 `servicekeel.io/imported-services` 注解声明所需访问的服务。
+2. Sidecar 负责将导出服务注册到 Router，根据服务信息配置相应的注册规则。
+3. Sidecar 负责将导入服务建立为本地代理，根据服务信息配置相应的代理规则。
 
 ### 4.3 示例 YAML
 
@@ -75,58 +136,55 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: app
+  name: client
   namespace: default
-  labels:
-    app: my-app
   annotations:
-    edge.io/exported-services: |
-      {
-        "services": [
-          {
-            "name": "my-service",
-            "namespace": "default",
-            "cluster": "cluster-a",
-            "ports": [
-              {"name": "http", "port": 80, "targetPort": 8080, "protocol": "TCP"}
-            ]
-          },
-          {
-            "name": "metrics",
-            "namespace": "default",
-            "cluster": "cluster-a",
-            "ports": [
-              {"name": "metrics", "port": 9090, "targetPort": 9090, "protocol": "UDP"}
-            ]
-          }
-        ]
-      }
-    edge.io/imported-services: |
-      {
-        "services": [
-          {
-            "name": "db-service",
-            "namespace": "default",
-            "cluster": "cluster-b",
-            "ports": [
-              {"name": "http", "port": 80, "targetPort": 8080, "protocol": "TCP"}
-            ]
-          },
-          {
-            "name": "cache",
-            "namespace": "default",
-            "cluster": "cluster-b",
-            "ports": [
-              {"name": "metrics", "port": 9090, "targetPort": 9090, "protocol": "UDP"}
-            ]
-          }
-        ]
-      }
+    servicekeel.io/imported-services: |
+      services:
+        - cluster: cluster-a.local
+          name: simple-server
+          namespace: default
+          ports:
+            - name: tcp
+              port: 8080
+              protocol: TCP
+              targetport: 8080
+            - name: ntp
+              port: 123
+              protocol: UDP
+              targetport: 123
 spec:
   containers:
-    - name: main
-      image: app:v1
+    - name: client
+      image: nicolaka/netshoot:latest
+      command:
+        - sh
+        - -c
+        - |
+          while true; do
+            echo "Testing simple-server..."
+            echo "TCP Test:"
+            curl -s http://simple-server.default:8080/
+            echo -e "\nUDP Test:"
+            echo "test" | nc -u -w 1 simple-server.default 123
+            sleep 5
+          done
+    - name: sidecar
+      image: tkeelio/service-keel-sidecar:latest
+      env:
+        - name: SIDECAR_IP_RANGE
+          value: "127.0.66.0/24"
+        - name: SIDECAR_DNS_ADDR
+          value: "127.0.0.2:53"
+        - name: SIDECAR_FRP_SERVER_LISTEN
+          value: "/tmp/frp.sock"
 ```
+
+[client-pod.yaml](../examples/simple/client-pod.yaml)
+[server-pod.yaml](../examples/simple/server-pod.yaml)
+[server-pod2.yaml](../examples/simple/server-pod2.yaml)
+
+
 
 ### 4.4 服务名称约定
 
@@ -138,18 +196,29 @@ spec:
 
 ## 五、系统组件说明
 
-### 5.1 边缘 Agent / Sidecar
+### 5.1 Sidecar
 
-- 监听 Pod 注解 `edge.io/exported-services` 和 `edge.io/imported-services`。
-- 向本地注册表（如 Consul、Envoy SDS、自定义注册表）注册导出服务。
-- 为导入服务建立代理或 DNS 重写，实现本地访问。
+- 监听 Pod 注解 `servicekeel.io/exported-services` 和 `servicekeel.io/imported-services`。
+- 实现本地 DNS 服务器，处理服务名称解析。
+- 为导入服务建立代理，实现本地访问。
 - 根据服务配置的协议类型（TCP/UDP）设置相应的代理规则。
 
-### 5.2 Controller
+主要功能：
+1. DNS 服务（127.0.0.2:53）
+   - 处理服务名称解析
+   - 支持 search 域
+   - 将服务名映射到本地 IP（127.0.66.0/24）
 
-- 部署于中心或边缘控制面。
-- Watch Service 与 Pod，识别匹配关系，为 Pod 自动补充 `edge.io/exported-services` 注解。
-- 可通过 CR 模板或 Admission Webhook 为 Pod 注入默认的 `edge.io/imported-services`。
+2. 代理服务
+   - 基于 frp 实现 TCP/UDP 代理
+   - 支持多协议转发
+   - 本地 socket 通信
+
+### 5.2 Controller（TODO）
+
+- 部署于中心。
+- Watch Service 与 Pod，识别匹配关系，为 Pod 自动补充 `servicekeel.io/exported-services` 注解。
+- 可通过 CR 模板或 Admission Webhook 为 Pod 注入默认的 `servicekeel.io/imported-services`。
 
 ## 六、兼容性与边缘断网处理
 
@@ -160,11 +229,4 @@ spec:
 ## 七、附加功能建议
 
 - 提供将 CR 转注解的转换工具或 Webhook。
-- 支持将服务端点信息（如 port、protocol）一起编码进注解。
-- 考虑为 StatefulSet 增强 Pod 注解的自动继承机制。
-- 添加协议类型验证，确保只支持 TCP 和 UDP。
-
-## 八、总结
-
-通过在 Pod 注解中记录服务注册与导入信息，包括协议类型等详细配置，实现轻量、灵活、无侵入的多集群服务注册与发现，适配边缘场景下的网络不稳定与自治需求。
-后续可结合服务网格、服务目录系统进一步扩展，例如与 Envoy SDS、CoreDNS、自定义注册表结合。
+- 优化 DNS 解析。

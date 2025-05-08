@@ -1,13 +1,25 @@
 services:
-    - cluster: cluster-a.local
-      name: backend
-      namespace: default
-      ports:
-        - name: http
-          port: 80
-          protocol: TCP
-          targetport: 8080
-        - name: http2
-          port: 88
-          protocol: TCP
-          targetport: 8888
+  - cluster: cluster-a.local
+    name: simple-server
+    namespace: default
+    ports:
+      - name: tcp
+        port: 8080
+        protocol: TCP
+        targetport: 8080
+      - name: ntp
+        port: 123
+        protocol: UDP
+        targetport: 123
+  - cluster: cluster-a.local
+    name: simple-server2
+    namespace: default
+    ports:
+      - name: tcp
+        port: 8080
+        protocol: TCP
+        targetport: 8080
+      - name: ntp
+        port: 123
+        protocol: UDP
+        targetport: 123

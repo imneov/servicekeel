@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/miekg/dns"
 	mdns "github.com/miekg/dns"
 )
 
@@ -20,6 +21,11 @@ type Server struct {
 	mappings map[string]net.IP
 	usedIPs  map[string]struct{}
 	searches []string
+}
+
+func init() {
+	// 设置日志格式，显示微秒级时间戳
+	log.SetFlags(log.Lmicroseconds | log.LstdFlags)
 }
 
 // NewServer creates a new DNS hijacking server for the given IP range.
@@ -160,15 +166,17 @@ func (s *Server) Start(address string) error {
 
 // handleRequest processes incoming DNS queries and returns A records based on mappings.
 func (s *Server) handleRequest(w mdns.ResponseWriter, req *mdns.Msg) {
+	log.Printf("handleRequest %d", req.Id)
 	msg := new(mdns.Msg)
 	msg.SetReply(req)
 
 	for _, q := range req.Question {
 		if q.Qtype != mdns.TypeA {
+			log.Printf("request ID %d with DNS %s(%s) is not A query, skipping", req.Id, q.Name, q.Qtype)
 			continue
 		}
 
-		log.Printf("Handling DNS A query for %s", q.Name)
+		log.Printf("Handling to request ID %d with DNS A query for %s", req.Id, q.Name)
 
 		// 尝试直接匹配
 		s.mu.RLock()
@@ -197,7 +205,7 @@ func (s *Server) handleRequest(w mdns.ResponseWriter, req *mdns.Msg) {
 				if ip, exists := s.mappings[fullName]; exists {
 					mappedIP = ip
 					ok = true
-					log.Printf("Found match using search domain: %s -> %s", q.Name, fullName)
+					log.Printf("Found request ID %d match using search domain: %s -> %s", req.Id, q.Name, fullName)
 					break
 				}
 			}
@@ -215,9 +223,12 @@ func (s *Server) handleRequest(w mdns.ResponseWriter, req *mdns.Msg) {
 				A: mappedIP,
 			}
 			msg.Answer = append(msg.Answer, rr)
-			log.Printf("Mapped DNS %s to IP %s", q.Name, mappedIP)
+			log.Printf("Mapped request ID %d DNS %s to IP %s", req.Id, q.Name, mappedIP)
+			msg.Authoritative = true
+			msg.Rcode = dns.RcodeSuccess // 这行非常关键，确保不是默认的 NXDOMAIN
+			break
 		} else {
-			log.Printf("No DNS mapping for %s, skipping", q.Name)
+			log.Printf("No DNS to request ID %d with mapping for %s, skipping", req.Id, q.Name)
 		}
 	}
 
@@ -229,9 +240,9 @@ func (s *Server) handleRequest(w mdns.ResponseWriter, req *mdns.Msg) {
 	}
 
 	if err := w.WriteMsg(msg); err != nil {
-		log.Printf("Failed to write DNS response: %v", err)
+		log.Printf("Failed to request ID %d with write DNS response: %v", req.Id, err)
 	}
-	log.Printf("Responded with %d answers and code %d", len(msg.Answer), msg.Rcode)
+	log.Printf("Responded to request ID %d with %d answers and code %d", req.Id, len(msg.Answer), msg.Rcode)
 }
 
 // Stop stops the DNS server and cleans up resources.
@@ -242,12 +253,12 @@ func (s *Server) Stop() {
 }
 
 // ServeDNS handles DNS queries and hijacks service names to local ipRange.
-func (s *Server) ServeDNS(w mdns.ResponseWriter, req *mdns.Msg) {
-	// stub implementation: reply with same question and no answers
-	msg := new(mdns.Msg)
-	msg.SetReply(req)
-	w.WriteMsg(msg)
-}
+// func (s *Server) ServeDNS(w mdns.ResponseWriter, req *mdns.Msg) {
+// 	// stub implementation: reply with same question and no answers
+// 	msg := new(mdns.Msg)
+// 	msg.SetReply(req)
+// 	w.WriteMsg(msg)
+// }
 
 func JoinDomain(domain, search string) string {
 	if !strings.HasSuffix(domain, ".") {

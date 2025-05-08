@@ -50,29 +50,29 @@ spec:
         - -c
         - |
           while true; do
-            echo "========================="
-            echo "Testing simple-server..."
-            echo "TCP Test:"
-            curl -s http://simple-server.default:8080/
-            echo -e "\nHealth Check:"
-            curl -s http://simple-server.default:8080/health
+            # echo "========================="
+            # echo "Testing simple-server..."
+            # echo "TCP Test:"
+            # curl -s http://simple-server.default:8080/
+            # echo -e "\nHealth Check:"
+            # curl -s http://simple-server.default:8080/health
             
             echo -e "\nUDP Test:"
             echo "Testing UDP port 123..."
-            echo "test" | nc -u -w 1 simple-server.default 123
+            echo "test" | nc -4 -u -w 1 simple-server.default 123
             echo "UDP test completed"
             
-            echo -e "\n========================="
-            echo "Testing simple-server2..."
-            echo "TCP Test:"
-            curl -s http://simple-server2.default:8080/
-            echo -e "\nHealth Check:"
-            curl -s http://simple-server2.default:8080/health
+            # echo -e "\n========================="
+            # echo "Testing simple-server2..."
+            # echo "TCP Test:"
+            # curl -s http://simple-server2.default:8080/
+            # echo -e "\nHealth Check:"
+            # curl -s http://simple-server2.default:8080/health
             
-            echo -e "\nUDP Test:"
-            echo "Testing UDP port 123..."
-            echo "test" | nc -u -w 1 simple-server2.default 123
-            echo "UDP test completed"
+            # echo -e "\nUDP Test:"
+            # echo "Testing UDP port 123..."
+            # echo "test" | nc -u -w 1 simple-server2.default 123
+            # echo "UDP test completed"
             
             echo -e "\n=========================\n"
             sleep 5
