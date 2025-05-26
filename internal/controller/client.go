@@ -72,6 +72,29 @@ func NewFRPClient(name string, args *EndpointInfo) (*FRPClient, error) {
 			"--local-port", args.ServicePort,
 			"--server-listen", args.FrpServerListen,
 		}
+	case EndpointTypeRelay:
+		// e.g.
+		// frpc stcp relay
+		// -n source-server/target-server
+		// --source-server source-frps:port
+		// --target-server target-frps:port
+		// --sk servicekeel-secret-key
+		// --server-listen /tmp/frp.sock
+		if args.SourceServer == "" {
+			return nil, fmt.Errorf("SourceServer is empty")
+		}
+		if args.TargetServer == "" {
+			return nil, fmt.Errorf("TargetServer is empty")
+		}
+		client.Args = []string{
+			"stcp",
+			"relay",
+			"-n", name,
+			"--source-server", args.SourceServer,
+			"--target-server", args.TargetServer,
+			"--sk", args.FrpSecretKey,
+			"--server-listen", args.FrpServerListen,
+		}
 	default:
 		return nil, fmt.Errorf("invalid endpoint type: %s", args.Type)
 	}

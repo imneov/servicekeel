@@ -1,4 +1,4 @@
-# 设计文档：边缘环境下基于 Pod 注解的服务注册与发现机制
+# 边缘环境下基于 Pod 注解的服务注册与发现机制
 
 ## 一、背景与动机
 
@@ -67,7 +67,7 @@ graph TB
                 App1[应用容器]
                 Sidecar1[ServiceKeel Sidecar<br/>DNS: 127.0.0.2:53]
             end
-            Router1[Router<br/>/tmp/frp.sock]
+            Router1[Router<br/>/tmp/router.sock]
         end
 
         subgraph Node2[节点 2]
@@ -75,7 +75,7 @@ graph TB
                 App2[应用容器]
                 Sidecar2[ServiceKeel Sidecar<br/>DNS: 127.0.0.2:53]
             end
-            Router2[Router<br/>/tmp/frp.sock]
+            Router2[Router<br/>/tmp/router.sock]
         end
     end
 
@@ -176,8 +176,8 @@ spec:
           value: "127.0.66.0/24"
         - name: SIDECAR_DNS_ADDR
           value: "127.0.0.2:53"
-        - name: SIDECAR_FRP_SERVER_LISTEN
-          value: "/tmp/frp.sock"
+        - name: SIDECAR_SERVER_LISTEN
+          value: "/tmp/router.sock"
 ```
 
 [client-pod.yaml](../examples/simple/client-pod.yaml)

@@ -61,7 +61,7 @@ spec:
           value: "127.0.66.0/24"
         - name: SIDECAR_DNS_ADDR
           value: "127.0.0.2:53"
-        - name: SIDECAR_FRP_SERVER_LISTEN
+        - name: SIDECAR_SERVER_LISTEN
           value: "/tmp/frp.sock"
       volumeMounts:
         - name: podinfo

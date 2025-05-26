@@ -69,6 +69,18 @@ func TestHandleRequest(t *testing.T) {
 	if !aRec.A.Equal(wantIP) {
 		t.Errorf("Got IP %s; want %s", aRec.A.String(), wantIP.String())
 	}
+	// test AAAA query
+	msg.SetQuestion(qname, mdns.TypeAAAA)
+	resp, _, err = client.Exchange(msg, addr)
+	if err != nil {
+		t.Fatalf("DNS query failed: %v", err)
+	}
+	if len(resp.Answer) != 0 {
+		t.Fatalf("Expected 0 answer; got %d", len(resp.Answer))
+	}
+	if resp.Rcode != mdns.RcodeSuccess {
+		t.Errorf("Expected RcodeSuccess; got %d", resp.Rcode)
+	}
 }
 
 func TestGetIP(t *testing.T) {
