@@ -1,0 +1,12 @@
+FROM golang:1.23 AS building
+
+COPY . /building
+WORKDIR /building
+
+RUN make sidecar
+
+FROM tkeelio/kube-frpc:0.61.2-20250507
+
+COPY --from=building /building/bin/sidecar /usr/bin/sidecar
+
+ENTRYPOINT ["/usr/bin/sidecar"]

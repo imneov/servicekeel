@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: server2
+  namespace: default
+  annotations:
+    servicekeel.io/exported-services: |
+      services:
+        - cluster: cluster-a.local
+          name: simple-server2
+          namespace: default
+          ports:
+            - name: tcp
+              port: 8080
+              protocol: TCP
+              targetport: 8080
+            - name: ntp
+              port: 123
+              protocol: UDP
+              targetport: 123
+    servicekeel.io/imported-services: |
+      services:
+        - cluster: cluster-b
+          name: other-service
+          namespace: default
+spec:
+  containers:
+    - name: tcp-server
+      image: nginx:latest
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+    - name: udp-server
+      image: dockurr/chrony:4.6.1
+      securityContext:
+        capabilities:
+          add: ["SYS_TIME"]
+      ports:
+        - containerPort: 123
+          protocol: UDP
+      command:
+        - chronyd
+        - -d
+        - -f
+        - /etc/chrony/chrony.conf
+      volumeMounts:
+        - name: chrony-config
+          mountPath: /etc/chrony/chrony.conf
+          subPath: chrony.conf
+        - name: chrony-run
+          mountPath: /run/chrony
+        - name: chrony-lib
+          mountPath: /var/lib/chrony
+    - name: sidecar
+      image: tkeelio/service-keel-sidecar:latest
+      env:
+        - name: SIDECAR_IP_RANGE
+          value: "127.0.66.0/24"
+        - name: SIDECAR_DNS_ADDR
+          value: "127.0.0.2:53"
+        - name: SIDECAR_SERVER_LISTEN
+          value: "/tmp/frp.sock"
+      volumeMounts:
+        - name: podinfo
+          mountPath: /etc/servicekeel
+        - name: frps-socket
+          mountPath: /tmp/frp.sock
+  volumes:
+    - name: chrony-run
+      emptyDir: {}
+    - name: chrony-lib
+      emptyDir: {}
+    - name: chrony-config
+      configMap:
+        name: chrony-config
+    - name: nginx-config
+      configMap:
+        name: nginx-config2
+        items:
+          - key: default.conf
+            path: default.conf
+    - name: podinfo
+      downwardAPI:
+        items:
+          - path: "exported-services-config.yaml"  # 第一个注解的文件名
+            fieldRef:
+              fieldPath: metadata.annotations['servicekeel.io/exported-services']
+          - path: "imported-services-config.yaml"  # 第二个注解的文件名
+            fieldRef:
+              fieldPath: metadata.annotations['servicekeel.io/imported-services']
+    - name: frps-socket
+      hostPath:
+        path: /tmp/frp.sock
+        type: Socket

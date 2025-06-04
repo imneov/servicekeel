@@ -1,0 +1,25 @@
+services:
+  - cluster: cluster-a.local
+    name: simple-server
+    namespace: default
+    ports:
+      - name: tcp
+        port: 8080
+        protocol: TCP
+        targetport: 8080
+      - name: ntp
+        port: 123
+        protocol: UDP
+        targetport: 123
+  - cluster: cluster-a.local
+    name: simple-server2
+    namespace: default
+    ports:
+      - name: tcp
+        port: 8080
+        protocol: TCP
+        targetport: 8080
+      - name: ntp
+        port: 123
+        protocol: UDP
+        targetport: 123
